@@ -1,4 +1,4 @@
-# STM32 ST-LINK on Windows ARM64
+# STM32 ST-LINK/V2 on Windows ARM64
 
 This repository documents a working ST-LINK setup for **Windows on ARM64**.
 
