@@ -10,7 +10,7 @@ The workaround has been tested with:
 
 - Windows 11 ARM64
 - STM32CubeIDE 2.2.0
-- STM32CubeProgrammer
+- STM32CubeProgrammer 2.23.0
 - ST-LINK/V2 on a NUCLEO-F411RE
 - ST-LINK/V2 on a NUCLEO-L432KC
 - STM32F411 target
