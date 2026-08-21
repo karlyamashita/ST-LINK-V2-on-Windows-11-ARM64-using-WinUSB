@@ -11,12 +11,15 @@ from pathlib import Path
 from tkinter import ttk, messagebox
 
 APP_NAME = "USB Friendly Name Editor"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.6.0"
 
 APPDATA_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "USB_Friendly_Name_Editor"
 BACKUP_FILE = APPDATA_DIR / "FriendlyNames.json"
 
 COM_SUFFIX_RE = re.compile(r"\s*\((COM\d+)\)\s*$", re.IGNORECASE)
+
+ACTIVE_PROCESSES = set()
+
 
 
 def is_admin() -> bool:
@@ -39,89 +42,189 @@ def run_powershell(script: str) -> str:
         "-Command",
         script,
     ]
-    cp = subprocess.run(
+
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+    proc = subprocess.Popen(
         cmd,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
+        creationflags=creationflags,
     )
-    if cp.returncode != 0:
-        raise RuntimeError(cp.stderr.strip() or cp.stdout.strip() or f"PowerShell exited {cp.returncode}")
-    return cp.stdout
+
+    ACTIVE_PROCESSES.add(proc)
+    try:
+        stdout, stderr = proc.communicate()
+    finally:
+        ACTIVE_PROCESSES.discard(proc)
+
+    if proc.returncode != 0:
+        raise RuntimeError(
+            (stderr or "").strip()
+            or (stdout or "").strip()
+            or f"PowerShell exited {proc.returncode}"
+        )
+
+    return stdout or ""
+
+
+def terminate_child_processes() -> None:
+    for proc in list(ACTIVE_PROCESSES):
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+        except Exception:
+            pass
+        finally:
+            ACTIVE_PROCESSES.discard(proc)
 
 
 def enumerate_devices() -> list[dict]:
-    ps = r'''
-$ErrorActionPreference = 'SilentlyContinue'
+    # PowerShell 5.1-compatible CIM/WMI enumeration.
+    ps = r"""
+$ErrorActionPreference = 'Stop'
 
-$drivers = @{}
-Get-CimInstance Win32_PnPSignedDriver | ForEach-Object {
-    if ($_.DeviceID) {
-        $drivers[$_.DeviceID.ToUpperInvariant()] = $_
+try {
+    $signed = @{}
+    Get-CimInstance Win32_PnPSignedDriver | ForEach-Object {
+        if ($_.DeviceID) {
+            $signed[$_.DeviceID.ToUpperInvariant()] = $_
+        }
     }
+
+    $ports = @{}
+    Get-CimInstance Win32_SerialPort | ForEach-Object {
+        if ($_.PNPDeviceID) {
+            $ports[$_.PNPDeviceID.ToUpperInvariant()] = $_.DeviceID
+        }
+    }
+
+    $items = Get-CimInstance Win32_PnPEntity | Where-Object {
+        ($_.Present -eq $true) -or ($_.Status -eq 'OK')
+    } | ForEach-Object {
+        $id = [string]$_.PNPDeviceID
+        $drv = $null
+        $port = ""
+        $friendly = ""
+        $provider = ""
+        $version = ""
+        $inf = ""
+        $deviceDesc = ""
+        $busDesc = ""
+        $manufacturer = ""
+
+        if ($id) {
+            $upper = $id.ToUpperInvariant()
+
+            if ($signed.ContainsKey($upper)) {
+                $drv = $signed[$upper]
+            }
+
+            if ($ports.ContainsKey($upper)) {
+                $port = [string]$ports[$upper]
+            }
+        }
+
+        if ($_.Name) {
+            $friendly = [string]$_.Name
+        }
+        elseif ($_.Caption) {
+            $friendly = [string]$_.Caption
+        }
+
+        $manufacturer = [string]$_.Manufacturer
+
+        if ($id) {
+            try {
+                $regPath = 'HKLM:\SYSTEM\CurrentControlSet\Enum\' + $id
+                $reg = Get-ItemProperty -LiteralPath $regPath -ErrorAction Stop
+                if ($reg.DeviceDesc) {
+                    $deviceDesc = [string]$reg.DeviceDesc
+                }
+                if ($reg.FriendlyName) {
+                    $friendly = [string]$reg.FriendlyName
+                }
+            } catch {}
+
+        }
+
+        if ($drv) {
+            $provider = [string]$drv.DriverProviderName
+            $version = [string]$drv.DriverVersion
+            $inf = [string]$drv.InfName
+        }
+
+        New-Object PSObject -Property @{
+            Status         = [string]$_.Status
+            Class          = [string]$_.PNPClass
+            FriendlyName   = $friendly
+            InstanceId     = $id
+            PortName       = $port
+            DriverProvider = $provider
+            DriverVersion  = $version
+            InfName        = $inf
+            DeviceDesc     = $deviceDesc
+            BusDescription = $busDesc
+            Manufacturer   = $manufacturer
+        }
+    }
+
+    @($items) | ConvertTo-Json -Depth 4 -Compress
 }
-
-$result = Get-PnpDevice -PresentOnly | ForEach-Object {
-    $id = $_.InstanceId
-    $drv = $null
-    if ($id) {
-        $drivers.TryGetValue($id.ToUpperInvariant(), [ref]$drv) | Out-Null
-    }
-
-    $port = $null
-    try {
-        $port = (Get-PnpDeviceProperty -InstanceId $id -KeyName 'DEVPKEY_Device_PortName').Data
-    } catch {}
-
-    $friendly = $_.FriendlyName
-    if (-not $friendly) {
-        try {
-            $friendly = (Get-PnpDeviceProperty -InstanceId $id -KeyName 'DEVPKEY_Device_FriendlyName').Data
-        } catch {}
-    }
-    if (-not $friendly) { $friendly = $_.Name }
-
-    [PSCustomObject]@{
-        Status         = [string]$_.Status
-        Class          = [string]$_.Class
-        FriendlyName   = [string]$friendly
-        InstanceId     = [string]$id
-        PortName       = [string]$port
-        DriverProvider = if ($drv) { [string]$drv.DriverProviderName } else { "" }
-        DriverVersion  = if ($drv) { [string]$drv.DriverVersion } else { "" }
-        InfName        = if ($drv) { [string]$drv.InfName } else { "" }
-    }
+catch {
+    [Console]::Error.WriteLine(($_ | Out-String))
+    exit 10
 }
+"""
 
-$result | ConvertTo-Json -Depth 4 -Compress
-'''
     raw = run_powershell(ps).strip()
     if not raw:
-        return []
+        raise RuntimeError("PowerShell returned no PnP device data.")
 
     data = json.loads(raw)
     if isinstance(data, dict):
         data = [data]
 
+    result = []
     for item in data:
         iid = item.get("InstanceId", "") or ""
+        if not iid:
+            continue
+
         m = re.search(r"VID_([0-9A-F]{4})", iid, re.I)
         item["VID"] = m.group(1).upper() if m else ""
+
         m = re.search(r"PID_([0-9A-F]{4})", iid, re.I)
         item["PID"] = m.group(1).upper() if m else ""
+
         m = re.search(r"&MI_([0-9A-F]{2})", iid, re.I)
         item["MI"] = m.group(1).upper() if m else ""
 
-    return data
+        result.append(item)
+
+    if not result:
+        raise RuntimeError("Windows returned zero present PnP devices.")
+
+    return result
 
 
-def registry_friendly_name(instance_id: str) -> str | None:
+def registry_property(instance_id: str, property_name: str) -> str | None:
     iid = ps_escape_single(instance_id)
+    prop = ps_escape_single(property_name)
     ps = rf'''
 $p = 'HKLM:\SYSTEM\CurrentControlSet\Enum\{iid}'
 try {{
-    $v = (Get-ItemProperty -LiteralPath $p -Name FriendlyName -ErrorAction Stop).FriendlyName
+    $item = Get-ItemProperty -LiteralPath $p -Name '{prop}' -ErrorAction Stop
+    $v = $item.'{prop}'
     [Console]::Out.Write([string]$v)
 }} catch {{
     exit 2
@@ -133,18 +236,52 @@ try {{
         return None
 
 
-def set_registry_friendly_name(instance_id: str, friendly_name: str) -> None:
+def set_registry_property(instance_id: str, property_name: str, value: str) -> None:
     iid = ps_escape_single(instance_id)
-    name = ps_escape_single(friendly_name)
+    prop = ps_escape_single(property_name)
+    val = ps_escape_single(value)
     ps = rf'''
 $ErrorActionPreference = 'Stop'
 $p = 'HKLM:\SYSTEM\CurrentControlSet\Enum\{iid}'
 if (-not (Test-Path -LiteralPath $p)) {{
     throw "PnP registry instance not found: {iid}"
 }}
-Set-ItemProperty -LiteralPath $p -Name FriendlyName -Value '{name}'
+Set-ItemProperty -LiteralPath $p -Name '{prop}' -Value '{val}'
 '''
     run_powershell(ps)
+
+
+def registry_friendly_name(instance_id: str) -> str | None:
+    return registry_property(instance_id, "FriendlyName")
+
+
+def registry_device_desc(instance_id: str) -> str | None:
+    return registry_property(instance_id, "DeviceDesc")
+
+
+def set_registry_friendly_name(instance_id: str, friendly_name: str) -> None:
+    set_registry_property(instance_id, "FriendlyName", friendly_name)
+
+
+def set_registry_device_desc(instance_id: str, device_desc: str) -> None:
+    set_registry_property(instance_id, "DeviceDesc", device_desc)
+
+
+def get_bus_reported_description(instance_id: str) -> str:
+    iid = ps_escape_single(instance_id)
+    ps = rf'''
+try {{
+    $p = Get-PnpDeviceProperty -InstanceId '{iid}' -KeyName 'DEVPKEY_Device_BusReportedDeviceDesc' -ErrorAction Stop
+    if ($p.Data) {{
+        [Console]::Out.Write([string]$p.Data)
+    }}
+}} catch {{
+}}
+'''
+    try:
+        return run_powershell(ps).strip()
+    except Exception:
+        return ""
 
 
 def load_backups() -> dict:
@@ -187,15 +324,19 @@ class App(tk.Tk):
         self.devices = []
         self.filtered = []
         self.selected_device = None
+        self.closing = False
 
         self.filter_var = tk.StringVar(value="All devices")
         self.search_var = tk.StringVar()
         self.new_name_var = tk.StringVar()
         self.preserve_com_var = tk.BooleanVar(value=True)
+        self.compat_desc_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Ready")
 
         self._build_ui()
-        self.refresh_devices()
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.status_var.set("Starting device enumeration...")
+        self.after(100, self.refresh_devices)
 
     def _build_ui(self):
         top = ttk.Frame(self, padding=8)
@@ -269,7 +410,10 @@ class App(tk.Tk):
         self.detail_labels = {}
         for row, (label, key) in enumerate([
             ("Instance ID", "instance"),
-            ("Current friendly name", "friendly"),
+            ("Friendly Name", "friendly"),
+            ("Device Description", "devdesc"),
+            ("Bus-reported Description", "busdesc"),
+            ("Manufacturer", "manufacturer"),
             ("Driver", "driver"),
         ]):
             ttk.Label(details, text=label + ":").grid(row=row, column=0, sticky="nw", padx=(0, 8), pady=2)
@@ -278,34 +422,78 @@ class App(tk.Tk):
             self.detail_labels[key] = val
 
         edit = ttk.Frame(details)
-        edit.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        edit.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         edit.columnconfigure(1, weight=1)
 
         ttk.Label(edit, text="New friendly name:").grid(row=0, column=0, sticky="w", padx=(0, 8))
-        ttk.Entry(edit, textvariable=self.new_name_var).grid(row=0, column=1, sticky="ew")
+        name_entry = ttk.Entry(edit, textvariable=self.new_name_var, width=72)
+        name_entry.grid(row=0, column=1, sticky="ew")
         ttk.Checkbutton(
             edit,
             text="Preserve / add (COMx) suffix",
             variable=self.preserve_com_var,
-        ).grid(row=0, column=2, padx=10)
-        ttk.Button(edit, text="Apply Name", command=self.apply_name).grid(row=0, column=3, padx=(5, 0))
-        ttk.Button(edit, text="Restore Original", command=self.restore_original).grid(row=0, column=4, padx=(5, 0))
+        ).grid(row=0, column=2, padx=(12, 8))
+        ttk.Button(edit, text="Apply Name", command=self.apply_name).grid(row=0, column=3, padx=(4, 0))
+        ttk.Button(edit, text="Restore Original", command=self.restore_original).grid(row=0, column=4, padx=(4, 0))
+
+        ttk.Checkbutton(
+            edit,
+            text="Also set Device Description (for apps such as Docklight)",
+            variable=self.compat_desc_var,
+        ).grid(row=1, column=1, columnspan=3, sticky="w", pady=(8, 0))
 
         bottom = ttk.Frame(self, padding=(8, 0, 8, 8))
         bottom.pack(fill="x")
         ttk.Label(bottom, textvariable=self.status_var).pack(side="left")
         ttk.Label(bottom, text=f"Backups: {BACKUP_FILE}").pack(side="right")
 
+    def on_close(self):
+        if self.closing:
+            return
+
+        self.closing = True
+        try:
+            self.status_var.set("Closing...")
+            self.update_idletasks()
+        except Exception:
+            pass
+
+        terminate_child_processes()
+
+        try:
+            self.quit()
+        except Exception:
+            pass
+
+        try:
+            self.destroy()
+        except Exception:
+            pass
+
+
     def refresh_devices(self):
+        if self.closing:
+            return
+
         self.status_var.set("Enumerating present PnP devices...")
         self.update_idletasks()
+
         try:
             self.devices = enumerate_devices()
+
+            if self.closing:
+                return
+
             self.status_var.set(f"Found {len(self.devices)} present devices.")
             self.apply_filter()
         except Exception as exc:
             self.status_var.set("Enumeration failed.")
-            messagebox.showerror(APP_NAME, f"Could not enumerate devices:\n\n{exc}")
+            messagebox.showerror(
+                APP_NAME,
+                "Could not enumerate Windows PnP devices.\n\n"
+                f"{exc}\n\n"
+                "The device list was not refreshed."
+            )
 
     def apply_filter(self):
         f = self.filter_var.get()
@@ -361,6 +549,9 @@ class App(tk.Tk):
             )
 
     def on_select(self, _event=None):
+        if self.closing:
+            return
+
         sel = self.tree.selection()
         if not sel:
             return
@@ -373,6 +564,12 @@ class App(tk.Tk):
 
         self.detail_labels["instance"].configure(text=d.get("InstanceId", "") or "")
         self.detail_labels["friendly"].configure(text=friendly)
+        self.detail_labels["devdesc"].configure(text=d.get("DeviceDesc", "") or "")
+        self.detail_labels["busdesc"].configure(text="Reading...")
+        self.detail_labels["manufacturer"].configure(text=d.get("Manufacturer", "") or "")
+        self.update_idletasks()
+        bus_desc = get_bus_reported_description(d.get("InstanceId", "") or "")
+        self.detail_labels["busdesc"].configure(text=bus_desc)
         self.detail_labels["driver"].configure(text=driver)
         self.new_name_var.set(COM_SUFFIX_RE.sub("", friendly).rstrip())
 
@@ -413,10 +610,15 @@ class App(tk.Tk):
         if current is None:
             current = d.get("FriendlyName", "") or ""
 
+        current_desc = registry_device_desc(iid)
+        if current_desc is None:
+            current_desc = d.get("DeviceDesc", "") or ""
+
         backups = load_backups()
         if iid not in backups:
             backups[iid] = {
                 "original": current,
+                "original_device_desc": current_desc,
                 "last_custom": name,
                 "friendly_at_backup": d.get("FriendlyName", "") or "",
                 "class": d.get("Class", "") or "",
@@ -427,10 +629,15 @@ class App(tk.Tk):
             }
         else:
             backups[iid]["last_custom"] = name
+            if "original_device_desc" not in backups[iid]:
+                backups[iid]["original_device_desc"] = current_desc
 
         try:
             save_backups(backups)
             set_registry_friendly_name(iid, name)
+            if self.compat_desc_var.get():
+                desc_name = COM_SUFFIX_RE.sub("", name).rstrip()
+                set_registry_device_desc(iid, desc_name)
         except Exception as exc:
             messagebox.showerror(APP_NAME, f"Could not change friendly name:\n\n{exc}")
             return
@@ -438,8 +645,10 @@ class App(tk.Tk):
         self.status_var.set(f"Changed friendly name to: {name}")
         messagebox.showinfo(
             APP_NAME,
-            "Friendly name updated.\n\n"
-            "If the old name is still displayed, unplug/replug the device or refresh Device Manager.",
+            "Device name updated.\n\n"
+            + ("Device Description was also updated for application compatibility.\n\n"
+               if self.compat_desc_var.get() else "")
+            + "Unplug/replug the device and restart applications that cache COM-port names.",
         )
         self.refresh_devices()
 
@@ -461,13 +670,17 @@ class App(tk.Tk):
             messagebox.showerror(APP_NAME, "The backup does not contain an original friendly name.")
             return
 
+        original_desc = item.get("original_device_desc", "")
+
         try:
             set_registry_friendly_name(iid, original)
+            if original_desc:
+                set_registry_device_desc(iid, original_desc)
         except Exception as exc:
-            messagebox.showerror(APP_NAME, f"Could not restore friendly name:\n\n{exc}")
+            messagebox.showerror(APP_NAME, f"Could not restore device names:\n\n{exc}")
             return
 
-        self.status_var.set(f"Restored friendly name: {original}")
+        self.status_var.set(f"Restored original device names: {original}")
         messagebox.showinfo(
             APP_NAME,
             "Original friendly name restored.\n\nIf necessary, unplug/replug the device.",
@@ -478,4 +691,15 @@ class App(tk.Tk):
 if __name__ == "__main__":
     if os.name != "nt":
         raise SystemExit("This utility is for Windows only.")
-    App().mainloop()
+
+    app = None
+    try:
+        app = App()
+        app.mainloop()
+    finally:
+        terminate_child_processes()
+        if app is not None:
+            try:
+                app.destroy()
+            except Exception:
+                pass

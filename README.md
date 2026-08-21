@@ -19,6 +19,80 @@ The workaround has been tested with:
 
 ---
 
+# Repository layout
+
+The fixes are separated by purpose. CubeIDE fixes are additionally separated
+by **STM32CubeIDE release**, because the JAR patch must be verified against the
+actual plugin shipped with each CubeIDE version.
+
+```text
+ST-LINK-V2-on-Windows-11-ARM64-using-WinUSB\
+│
+├── STM32CubeProgrammer_fix\
+│   ├── Patch_STLink_Normal_Mode.bat
+│   └── Patch_STLink_Update_Mode.bat
+│
+├── STM32CubeIDE_fix\
+│   └── STM32CubeIDE_2.2.0\
+│       ├── Install_CubeIDE_ARM64_STLink_Fix.bat
+│       ├── Patch_STLink_ARM64.ps1
+│       └── Restore_CubeIDE_ARM64_STLink_Fix.bat
+│
+├── COM Port Friendly_name_editor\
+│   ├── Run_USB_Friendly_Name_Editor.bat
+│   ├── Run_USB_Friendly_Name_Editor_As_Admin.bat
+│   └── usb_friendly_name_editor.py
+│
+└── README.md
+```
+
+For STM32CubeIDE 2.2.0, use only:
+
+```text
+STM32CubeIDE_fix\STM32CubeIDE_2.2.0
+```
+
+Do not move the three files out of that version folder; they are intended to
+stay together.
+
+## Future STM32CubeIDE versions
+
+Do **not** copy the 2.2.0 patch into a new CubeIDE version folder and assume it
+is compatible.
+
+When ST releases STM32CubeIDE 2.2.1, 2.3.0, or a later release, the new
+installation must first be inspected. In particular, the ST-LINK debug plugin
+JAR and the firmware-preflight implementation must be checked to determine
+whether:
+
+- the ARM64 problem still exists
+- ST has fixed the problem natively
+- the plugin JAR name/version changed
+- `StLinkFwUtil` or `validate(String)` changed
+- the existing patch logic is still applicable
+
+Only after that version has been analyzed and tested should a new folder be
+added, for example:
+
+```text
+STM32CubeIDE_fix\
+├── STM32CubeIDE_2.2.0\
+├── STM32CubeIDE_2.2.1\
+└── STM32CubeIDE_2.3.0\
+```
+
+Each version folder should contain a patch made and verified specifically for
+that CubeIDE release.
+
+If ST fixes the Windows ARM64 ST-LINK preflight problem in a later release,
+that release should be documented as **native support / patch not required**
+instead of adding an unnecessary JAR modification.
+
+The version-specific installer should always fail safely on an unsupported
+CubeIDE/JAR rather than attempting to patch an unknown version.
+
+---
+
 ## What is being fixed
 
 On Windows ARM64, ST-LINK can be made visible to STM32CubeProgrammer by using the Microsoft **WinUSB** driver and making the device enumerate in the form expected by ST software.
@@ -110,7 +184,13 @@ If they work but CubeIDE still displays the firmware-verification popup, continu
 
 ## Files required
 
-These three files must stay together in the same folder:
+For STM32CubeIDE 2.2.0, open:
+
+```text
+STM32CubeIDE_fix\STM32CubeIDE_2.2.0
+```
+
+These three files must stay together in that version-specific folder:
 
 ```text
 Install_CubeIDE_ARM64_STLink_Fix.bat
@@ -161,12 +241,10 @@ The workaround changes only this validation method so the CubeIDE launch can pro
 
 1. **Close STM32CubeIDE completely.**
 
-2. Put these files together:
+2. Open:
 
 ```text
-Install_CubeIDE_ARM64_STLink_Fix.bat
-Patch_STLink_ARM64.ps1
-Restore_CubeIDE_ARM64_STLink_Fix.bat
+STM32CubeIDE_fix\STM32CubeIDE_2.2.0
 ```
 
 3. Right-click:
@@ -284,6 +362,78 @@ The CubeIDE JAR patch is for CubeIDE's firmware-preflight check. It is not requi
 
 ---
 
+# Optional: COM Port Friendly Name Editor
+
+The WinUSB workaround does not require replacing the ST-LINK/V2-1 Virtual COM
+Port driver. Windows ARM64 can use Microsoft's built-in:
+
+```text
+usbser.inf
+```
+
+However, applications may initially show the generic description:
+
+```text
+COM6 (USB Serial Device)
+```
+
+The optional utility is in:
+
+```text
+COM Port Friendly_name_editor
+```
+
+For browsing devices, run:
+
+```text
+Run_USB_Friendly_Name_Editor.bat
+```
+
+To change or restore names, run:
+
+```text
+Run_USB_Friendly_Name_Editor_As_Admin.bat
+```
+
+as Administrator.
+
+Windows exposes more than one device-name property. The editor displays
+Friendly Name, Device Description, Bus-reported Description, Manufacturer,
+driver and INF information.
+
+During testing, changing only Windows `FriendlyName` changed the PnP display
+name but **Docklight still showed `USB Serial Device`**. Docklight was verified
+to use the device description for its COM-port list.
+
+For applications such as Docklight, enable:
+
+```text
+Also set Device Description (for apps such as Docklight)
+```
+
+For example, the tested ST-LINK VCOM changed from:
+
+```text
+COM6 (USB Serial Device)
+```
+
+to:
+
+```text
+COM6 (STLink Virtual COM Port)
+```
+
+The COM port remained COM6 and the driver remained Microsoft's `usbser.inf`.
+
+The editor backs up the original naming values and provides **Restore
+Original**. Changing these display properties does not change the device
+VID/PID, USB firmware, COM-port number or driver binding.
+
+The editor is generic and can also be used to give useful Windows friendly
+names to J-Link probes, USB serial adapters and other PnP devices.
+
+---
+
 # Using the same ST-LINK on Intel/AMD Windows
 
 The Microsoft **WinUSB** driver works on both:
@@ -390,7 +540,27 @@ com.st.stm32cube.ide.mcu.debug_2.2.300.202601241706.jar
 
 Do not blindly use the patch with another CubeIDE version.
 
-If ST changes the plugin JAR or the `StLinkFwUtil` implementation, a new patch should be created and tested for that CubeIDE release.
+For every new STM32CubeIDE release, first inspect the **new release's actual
+ST-LINK plugin JAR**. Verify the relevant class/method and determine whether the
+ARM64 preflight problem still exists before creating a fix.
+
+If a patch is still required, create a new version-specific folder under:
+
+```text
+STM32CubeIDE_fix
+```
+
+For example:
+
+```text
+STM32CubeIDE_fix\STM32CubeIDE_2.2.1
+```
+
+The new folder may use the 2.2.0 scripts as a starting point, but the JAR
+filename, version checks, class/method and patch logic must be validated against
+the new release before publishing it.
+
+If ST has fixed the issue, document that version as **patch not required**.
 
 The installer should refuse to patch an unsupported installation rather than guessing.
 
@@ -476,20 +646,34 @@ Remove that custom `restore` command and use an appropriate flash programming fl
 
 # Files to commit to GitHub
 
-For the CubeIDE portion, commit:
+Keep the repository organized by function and CubeIDE version:
 
 ```text
-Install_CubeIDE_ARM64_STLink_Fix.bat
-Patch_STLink_ARM64.ps1
-Restore_CubeIDE_ARM64_STLink_Fix.bat
+STM32CubeProgrammer_fix\
+    Patch_STLink_Normal_Mode.bat
+    Patch_STLink_Update_Mode.bat
+
+STM32CubeIDE_fix\
+    STM32CubeIDE_2.2.0\
+        Install_CubeIDE_ARM64_STLink_Fix.bat
+        Patch_STLink_ARM64.ps1
+        Restore_CubeIDE_ARM64_STLink_Fix.bat
+
+COM Port Friendly_name_editor\
+    Run_USB_Friendly_Name_Editor.bat
+    Run_USB_Friendly_Name_Editor_As_Admin.bat
+    usb_friendly_name_editor.py
+
 README.md
 ```
 
-Keep your existing WinUSB setup BAT files in the repository as well.
+Add another `STM32CubeIDE_<version>` folder only after that CubeIDE release has
+been inspected and its fix has been tested.
 
 Do **not** distribute STMicroelectronics JAR files themselves.
 
-The patch modifies the user's locally installed CubeIDE JAR after verifying the expected version.
+The patch modifies the user's locally installed CubeIDE JAR after verifying the
+expected version.
 
 ---
 
