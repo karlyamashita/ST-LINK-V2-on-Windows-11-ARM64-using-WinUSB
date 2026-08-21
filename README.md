@@ -2,7 +2,9 @@
 
 This repository documents a working ST-LINK setup for **Windows on ARM64**.
 
-The primary goal is to make **STM32CubeIDE debugging work first**, because that is the normal development workflow. After the debugger is working, the same ST-LINK can also be used with **STM32CubeProgrammer** for production programming.
+The first step is to make the **ST-LINK/V2 work with STM32CubeProgrammer** on Windows ARM64. This establishes the required WinUSB driver binding and ST device-interface GUID before any STM32CubeIDE-specific changes are made.
+
+After STM32CubeProgrammer can detect the probe and communicate with the target, the separate STM32CubeIDE workaround can be applied if CubeIDE still fails its ST-LINK firmware/preflight validation.
 
 The workaround has been tested with:
 
@@ -97,7 +99,37 @@ CubeIDE/JAR rather than attempting to patch an unknown version.
 
 ## What is being fixed
 
-On Windows ARM64, ST-LINK can be made visible to STM32CubeProgrammer by using the Microsoft **WinUSB** driver and making the device enumerate in the form expected by ST software.
+There are **two separate issues**, and they should be fixed in this order.
+
+### 1. STM32CubeProgrammer / Windows USB setup
+
+On Windows ARM64, the affected ST-LINK/V2 debug interface is first changed to use Microsoft's **WinUSB** driver. Changing the driver alone is not sufficient: the ST-LINK device interface also needs the STMicroelectronics device-interface GUID expected by the ST tools:
+
+```text
+{DBCE1CD9-A320-4B51-A365-A0C3F3C5FB29}
+```
+
+The patch adds/verifies that GUID in the selected ST-LINK device instance's:
+
+```text
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Enum\<ST-LINK Instance ID>\Device Parameters
+```
+
+as:
+
+```text
+Name: DeviceInterfaceGUIDs
+Type: REG_MULTI_SZ
+Data: {DBCE1CD9-A320-4B51-A365-A0C3F3C5FB29}
+```
+
+If other GUIDs are already present, the BAT preserves them and adds the ST GUID only if it is missing.
+
+The ST-LINK firmware-update mode enumerates as a **different USB device**, so when a firmware update is required, that update-mode device must also be configured for WinUSB and the same ST device-interface GUID. This is what allows ST-LINK/V2 firmware updates to be performed directly on the Windows ARM64 computer rather than moving the probe to an Intel/AMD Windows computer.
+
+Before doing anything to STM32CubeIDE, verify that STM32CubeProgrammer can detect the ST-LINK and read target memory.
+
+### 2. STM32CubeIDE preflight validation
 
 STM32CubeIDE has an additional problem.
 
@@ -120,18 +152,51 @@ The normal ST-LINK GDB Server, SWD target connection, flash programming, GDB com
 
 # Recommended order
 
-## 1. Get the ST-LINK working with WinUSB
+## 1. Get STM32CubeProgrammer working first
 
-Use the existing WinUSB / ST-LINK ARM64 setup BAT files in this repository first.
+Open:
 
-The result you want is:
+```text
+STM32CubeProgrammer_fix
+```
 
-- ST-LINK appears in Windows using WinUSB.
-- STM32CubeProgrammer can connect to the ST-LINK.
-- STM32CubeProgrammer can read target flash.
-- ST-LINK firmware can be upgraded successfully if required.
+For the normal ST-LINK/V2 debug interface, run:
 
-Do not continue modifying USB drivers once CubeProgrammer is able to communicate with the probe.
+```text
+Patch_STLink_Normal_Mode.bat
+```
+
+The goal of this first stage is to:
+
+1. bind the applicable ST-LINK/V2 interface to **WinUSB**
+2. add/verify the ST device-interface GUID:
+   `{DBCE1CD9-A320-4B51-A365-A0C3F3C5FB29}`
+3. verify STM32CubeProgrammer detects the ST-LINK
+4. verify STM32CubeProgrammer can connect to the STM32 target and read memory
+
+Changing only the Windows driver to WinUSB is **not the complete fix**. The
+`DeviceInterfaceGUIDs` registry value is part of the STM32CubeProgrammer
+workaround.
+
+### ST-LINK/V2 firmware-update mode
+
+When the ST-LINK/V2 enters firmware-update mode it enumerates as a different
+USB device. If STM32CubeProgrammer cannot perform the firmware update on ARM64,
+use:
+
+```text
+Patch_STLink_Update_Mode.bat
+```
+
+while the probe is in update mode. This configures that separate enumeration
+for WinUSB and adds/verifies the same ST device-interface GUID.
+
+After this is working, the firmware can be updated on the ARM64 computer
+without moving the ST-LINK/V2 to an Intel/AMD PC.
+
+Do not proceed to the CubeIDE JAR patch until **STM32CubeProgrammer already
+works with the probe and target**. If CubeProgrammer cannot connect or read
+memory, fix the USB/WinUSB/GUID setup first.
 
 ---
 
