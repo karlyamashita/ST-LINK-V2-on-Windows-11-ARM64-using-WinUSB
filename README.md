@@ -160,11 +160,36 @@ Open:
 STM32CubeProgrammer_fix
 ```
 
-For the normal ST-LINK/V2 debug interface, run:
+### Step 1A - Change the ST-LINK debug interface to WinUSB in Device Manager
+
+Before running the normal-mode GUID patch, change the ST-LINK/V2 debug
+interface from the ST driver to Microsoft's **WinUSB** driver.
+
+1. Connect the ST-LINK/V2 to the ARM64 computer.
+2. Open **Device Manager**.
+3. Locate the ST-LINK debug interface. On an ST-LINK/V2-1 composite device,
+   make sure you are changing the **debug interface**, not the Virtual COM Port
+   or Mass Storage interface.
+4. Right-click the ST-LINK debug interface and select **Update driver**.
+5. Select **Browse my computer for drivers**.
+6. Select **Let me pick from a list of available drivers on my computer**.
+7. Select the Microsoft **WinUSB** driver / **WinUSB Device** entry.
+8. Complete the driver update.
+9. Re-open the device properties and verify the debug interface is now using
+   Microsoft's `winusb.sys` / `winusb.inf`.
+
+Do **not** change the ST-LINK Virtual COM Port to WinUSB. The VCOM should remain
+on Microsoft's USB serial driver (`usbser.inf`). Likewise, do not change the
+Mass Storage interface.
+
+After the debug interface is using WinUSB, run:
 
 ```text
-Patch_STLink_Normal_Mode.bat
+STM32CubeProgrammer_fix\Patch_STLink_Normal_Mode.bat
 ```
+
+The BAT adds/verifies the ST device-interface GUID required for
+STM32CubeProgrammer to discover the WinUSB-bound ST-LINK interface.
 
 The goal of this first stage is to:
 
@@ -188,8 +213,14 @@ use:
 Patch_STLink_Update_Mode.bat
 ```
 
-while the probe is in update mode. This configures that separate enumeration
-for WinUSB and adds/verifies the same ST device-interface GUID.
+while the probe is in update mode.
+
+Because firmware-update mode is a separate USB enumeration, first check that
+update-mode device in **Device Manager** as well. If it is not using WinUSB,
+use **Update driver -> Browse my computer for drivers -> Let me pick from a
+list of available drivers on my computer** and select the Microsoft WinUSB
+driver. Then run `Patch_STLink_Update_Mode.bat` to add/verify the same ST
+device-interface GUID for that enumeration.
 
 After this is working, the firmware can be updated on the ARM64 computer
 without moving the ST-LINK/V2 to an Intel/AMD PC.
