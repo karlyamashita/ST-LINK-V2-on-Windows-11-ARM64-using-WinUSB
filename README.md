@@ -1,301 +1,502 @@
-# ST-LINK on Windows 11 ARM64 using WinUSB
+# STM32 ST-LINK on Windows ARM64
 
-This guide describes a tested workaround for using an ST-LINK/V2-1 on Windows 11 ARM64 with STMicroelectronics tools.
+This repository documents a working ST-LINK setup for **Windows on ARM64**.
 
-Tested successfully with:
+The primary goal is to make **STM32CubeIDE debugging work first**, because that is the normal development workflow. After the debugger is working, the same ST-LINK can also be used with **STM32CubeProgrammer** for production programming.
+
+The workaround has been tested with:
 
 - Windows 11 ARM64
-- Nucleo-F411RE
-- Built-in ST-LINK/V2-1
+- STM32CubeIDE 2.2.0
 - STM32CubeProgrammer
-- STLinkUpgrade
-- Microsoft WinUSB driver
+- ST-LINK/V2-1 on a NUCLEO-F411RE
+- STM32F411 target
+- ST-LINK GDB Server
+- SWD debugging
+- Source-level breakpoints
 
-The key idea is:
+> This is an unofficial workaround and is not provided or supported by STMicroelectronics.
 
-1. Bind the ST-LINK USB interface to Microsoft's built-in **WinUSB** driver.
-2. Add the ST-LINK device-interface GUID expected by ST software.
-3. Repeat the process for the separate ST-LINK firmware-update USB mode.
+---
 
-## Important
+## What is being fixed
 
-The ST-LINK appears as different USB devices depending on its mode.
+On Windows ARM64, ST-LINK can be made visible to STM32CubeProgrammer by using the Microsoft **WinUSB** driver and making the device enumerate in the form expected by ST software.
 
-### Normal ST-LINK/V2-1 mode
+STM32CubeIDE has an additional problem.
 
-Typical device:
+Even after the ST-LINK works with STM32CubeProgrammer and the standalone ST-LINK GDB Server, CubeIDE can stop before debugging with:
 
 ```text
-VID_0483
-PID_374B
+ST-LINK firmware verification
+
+No ST-LINK detected!
+Please connect ST-LINK and restart the debug session.
 ```
 
-The debug interface is normally `MI_00`.
+The CubeIDE firmware preflight check uses a different STLinkServer-based enumeration path than the ST-LINK GDB Server.
 
-### ST-LINK firmware-update mode
+The CubeIDE workaround in this repository patches only that firmware preflight check.
 
-When **Open in update mode** is selected in STLinkUpgrade, the ST-LINK re-enumerates as:
+The normal ST-LINK GDB Server, SWD target connection, flash programming, GDB communication, and debugger remain active.
+
+---
+
+# Recommended order
+
+## 1. Get the ST-LINK working with WinUSB
+
+Use the existing WinUSB / ST-LINK ARM64 setup BAT files in this repository first.
+
+The result you want is:
+
+- ST-LINK appears in Windows using WinUSB.
+- STM32CubeProgrammer can connect to the ST-LINK.
+- STM32CubeProgrammer can read target flash.
+- ST-LINK firmware can be upgraded successfully if required.
+
+Do not continue modifying USB drivers once CubeProgrammer is able to communicate with the probe.
+
+---
+
+# 2. Verify the ST-LINK GDB Server before patching CubeIDE
+
+For STM32CubeIDE 2.2.0, the bundled GDB Server used during testing was:
 
 ```text
-VID_0483
-PID_3748 (in update mode the last number is 8, not b)
+C:\ST\STM32CubeIDE_2.2.0\STM32CubeIDE\plugins\
+com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.win32_2.2.500.202604010938\
+tools\bin\ST-LINK_gdbserver.exe
 ```
 
-Windows ARM64 may show this device under **Other devices** as:
+First verify probe enumeration.
 
-```text
-STM32 STLink
+Example:
+
+```bat
+"C:\ST\STM32CubeIDE_2.2.0\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.win32_2.2.500.202604010938\tools\bin\ST-LINK_gdbserver.exe" ^
+-cp "C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin" ^
+-d ^
+-q
 ```
 
-Both modes need a usable WinUSB binding and the ST-LINK interface GUID.
-
-The GUID used by ST software is:
+A working probe returns something similar to:
 
 ```text
-{DBCE1CD9-A320-4B51-A365-A0C3F3C5FB29}
+ST-LINK:0676FF495365495067171045
+```
+
+Then test SWD startup:
+
+```bat
+"C:\ST\STM32CubeIDE_2.2.0\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.win32_2.2.500.202604010938\tools\bin\ST-LINK_gdbserver.exe" ^
+-cp "C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin" ^
+-d
+```
+
+A successful result should reach:
+
+```text
+Waiting for debugger connection...
+```
+
+If these tests fail, fix the ST-LINK / WinUSB setup first.
+
+If they work but CubeIDE still displays the firmware-verification popup, continue below.
+
+---
+
+# 3. CubeIDE ARM64 firmware-preflight patch
+
+## Files required
+
+These three files must stay together in the same folder:
+
+```text
+Install_CubeIDE_ARM64_STLink_Fix.bat
+Patch_STLink_ARM64.ps1
+Restore_CubeIDE_ARM64_STLink_Fix.bat
+```
+
+The BAT file does **not** contain the JAR patch itself.
+
+The actual JAR modification is performed by:
+
+```text
+Patch_STLink_ARM64.ps1
 ```
 
 ---
 
-# Part 1 - Normal ST-LINK operation
+## What JAR is modified
 
-## 1. Connect the ST-LINK
-
-Connect the Nucleo board or ST-LINK to the Windows ARM64 computer.
-
-Open **Device Manager**.
-
-Find the ST-LINK debug interface.
-
-For a Nucleo-F411RE with ST-LINK/V2-1, the normal USB device is typically:
+For the tested STM32CubeIDE 2.2.0 installation, the patch modifies:
 
 ```text
-VID_0483&PID_374B
+C:\ST\STM32CubeIDE_2.2.0\STM32CubeIDE\plugins\
+com.st.stm32cube.ide.mcu.debug_2.2.300.202601241706.jar
 ```
 
-The debug interface is normally:
+Inside that JAR, the relevant class is:
 
 ```text
-MI_00
+com.st.stm32cube.ide.mcu.debug.stlinkfwutil.StLinkFwUtil
 ```
 
-## 2. Bind the debug interface to WinUSB
-
-In Device Manager:
-
-1. Right-click the ST-LINK debug interface.
-2. Select **Update driver**.
-3. Select **Browse my computer for drivers**.
-4. Select **Let me pick from a list of available drivers on my computer**.
-5. Select **Universal Serial Bus devices**.
-6. Select manufacturer **WinUsb Device**.
-7. Select model **WinUsb Device**.
-8. Complete the driver installation.
-
-Afterward, the ST-LINK debug interface should appear under:
+CubeIDE calls:
 
 ```text
-Universal Serial Bus devices
+StLinkFwUtil.validate(String)
 ```
 
-and use the Microsoft WinUSB driver.
+before starting the debugger.
 
-## 3. Add the ST-LINK interface GUID
+On the affected Windows ARM64 configuration, that validation uses STLinkServer-based enumeration and reports that no ST-LINK exists even though the ST-LINK GDB Server can already communicate with the probe.
 
-Run:
-
-```text
-Patch_STLink_Normal_Mode.bat
-```
-
-The BAT file:
-
-- requests Administrator privileges,
-- finds the connected ST-LINK,
-- verifies that WinUSB is active,
-- adds the ST interface GUID,
-- restarts the device,
-- verifies the registry value,
-- writes a log file,
-- waits for a keypress before exiting.
-
-The GUID added is:
-
-```text
-{DBCE1CD9-A320-4B51-A365-A0C3F3C5FB29}
-```
-
-## 4. Reconnect the ST-LINK
-
-If necessary, unplug and reconnect the ST-LINK/Nucleo.
-
-Open **STM32CubeProgrammer**.
-
-Select:
-
-```text
-ST-LINK
-```
-
-The ST-LINK serial number should appear and CubeProgrammer should now be able to connect to the target.
+The workaround changes only this validation method so the CubeIDE launch can proceed to the normal GDB Server.
 
 ---
 
-# Part 2 - ST-LINK firmware update mode
+## Install the CubeIDE fix
 
-The firmware updater uses a different USB personality.
+1. **Close STM32CubeIDE completely.**
 
-## 1. Open STLinkUpgrade
-
-Start STLinkUpgrade.
-
-The normal ST-LINK should initially appear.
-
-Click:
+2. Put these files together:
 
 ```text
-Open in update mode
+Install_CubeIDE_ARM64_STLink_Fix.bat
+Patch_STLink_ARM64.ps1
+Restore_CubeIDE_ARM64_STLink_Fix.bat
 ```
 
-The ST-LINK will disconnect from normal mode and re-enumerate.
-
-On the tested ST-LINK/V2-1, update mode appears as:
+3. Right-click:
 
 ```text
-USB\VID_0483&PID_3748
+Install_CubeIDE_ARM64_STLink_Fix.bat
 ```
 
-Windows ARM64 may initially show:
+4. Select:
 
 ```text
-Other devices
-    STM32 STLink
+Run as administrator
 ```
 
-with a yellow warning icon.
+5. The installer checks that Windows reports ARM64 and that the expected CubeIDE JAR exists.
 
-## 2. Bind PID_3748 to WinUSB
-
-In Device Manager:
-
-1. Right-click **STM32 STLink**.
-2. Select **Update driver**.
-3. Select **Browse my computer for drivers**.
-4. Select **Let me pick from a list of available drivers on my computer**.
-5. Select **Universal Serial Bus devices**.
-6. Select manufacturer **WinUsb Device**.
-7. Select model **WinUsb Device**.
-8. Complete the installation.
-
-The device should move from **Other devices** to:
+6. The original JAR is backed up automatically as:
 
 ```text
-Universal Serial Bus devices
-    STM32 STLink
+com.st.stm32cube.ide.mcu.debug_2.2.300.202601241706.jar.ORIGINAL_ARM64_STLINK_FIX
 ```
 
-and the warning icon should disappear.
+7. The patch modifies the JAR and verifies the modified class.
 
-Do not unplug the board yet.
-
-## 3. Add the ST interface GUID to update mode
-
-Run:
+A successful run reports:
 
 ```text
-Patch_STLink_Update_Mode.bat
+PATCH FINISHED SUCCESSFULLY.
 ```
 
-This BAT only targets:
+---
+
+# 4. Configure STM32CubeIDE
+
+Open the project debug configuration:
 
 ```text
-VID_0483&PID_3748
+Run
+  -> Debug Configurations
+  -> STM32 C/C++ Application
+  -> Debugger
 ```
 
-It does not modify the normal `PID_374B` interface.
-
-The script:
-
-- verifies that PID_3748 is present,
-- verifies that it is using WinUSB,
-- adds the ST interface GUID,
-- verifies the registry change,
-- restarts PID_3748,
-- saves a log,
-- waits for a keypress.
-
-## 4. Refresh STLinkUpgrade
-
-Return to STLinkUpgrade and click:
+Use:
 
 ```text
-Refresh device list
+ST-LINK (ST-LINK GDB server)
 ```
 
-The ST-LINK should now appear in firmware-update mode.
+rather than relying on the failing CubeIDE firmware-preflight path.
 
-The firmware version should be readable and the firmware upgrade process should work normally.
+After the patch, the normal ST-LINK GDB Server should start and CubeIDE should be able to:
 
-After the firmware upgrade completes, unplug/reconnect the Nucleo or ST-LINK if necessary to return to normal operating mode.
+- connect over SWD
+- load the program
+- run the target
+- halt the target
+- single-step
+- stop on source-code breakpoints
+
+The tested Windows ARM64 system successfully halted on breakpoints after this change.
+
+---
+
+# 5. Restore the original CubeIDE JAR
+
+Close STM32CubeIDE.
+
+Right-click:
+
+```text
+Restore_CubeIDE_ARM64_STLink_Fix.bat
+```
+
+and select:
+
+```text
+Run as administrator
+```
+
+The original JAR backup is copied back into the CubeIDE installation.
+
+Use the restore operation before upgrading CubeIDE.
+
+---
+
+# 6. STM32CubeProgrammer
+
+Once the WinUSB setup is correct, STM32CubeProgrammer can be used normally for production programming.
+
+Typical development flow:
+
+```text
+STM32CubeIDE
+    -> build
+    -> program
+    -> run
+    -> debug
+    -> breakpoints
+```
+
+Typical production flow:
+
+```text
+STM32CubeProgrammer
+    -> connect with ST-LINK
+    -> erase/program
+    -> verify
+```
+
+The CubeIDE JAR patch is for CubeIDE's firmware-preflight check. It is not required by STM32CubeProgrammer itself.
+
+---
+
+
+---
+
+# Using the same ST-LINK on Intel/AMD Windows
+
+The Microsoft **WinUSB** driver works on both:
+
+- Windows ARM64
+- Intel/AMD x64 Windows
+
+So you do **not** have to restore the ST-LINK to another driver just because
+you move the probe from an ARM64 PC to an Intel/AMD PC.
+
+If the ST-LINK works correctly with STM32CubeIDE and STM32CubeProgrammer on
+the x64 machine, leave the WinUSB configuration alone.
+
+## When to reinstall ST's standard driver
+
+Reinstall ST's standard ST-LINK driver only if:
+
+- an ST utility on the Intel/AMD PC cannot detect the probe
+- an older ST tool expects the stock ST driver configuration
+- you want to return the x64 PC to ST's standard supported setup
+
+ST's official Windows ST-LINK driver package is:
+
+```text
+STSW-LINK009
+```
+
+It supports:
+
+- ST-LINK
+- ST-LINK/V2
+- ST-LINK/V2-1
+- STLINK-V3
+
+A typical STM32CubeProgrammer installation also includes the ST-LINK driver
+installer.
+
+The usual installer is:
+
+```text
+stlink_winusb_install.bat
+```
+
+Run it as Administrator if you want to return the Intel/AMD PC to the stock
+ST driver setup.
+
+## If Windows keeps the existing WinUSB assignment
+
+Open:
+
+```text
+Device Manager
+  -> ST-LINK device
+  -> Properties
+  -> Driver
+  -> Update driver
+  -> Browse my computer for drivers
+  -> Let me pick from a list of available drivers on my computer
+```
+
+Then select the STMicroelectronics/ST-LINK driver if it is listed.
+
+If it is not listed, install STSW-LINK009 first.
+
+## CubeIDE JAR patch on x64
+
+The **CubeIDE JAR patch in this repository is intended for the Windows ARM64
+problem described here**.
+
+Do not apply the ARM64 CubeIDE JAR patch to a normal Intel/AMD CubeIDE
+installation unless you have independently reproduced the same firmware
+preflight bug and verified the patch against that exact CubeIDE version.
+
+If a CubeIDE installation was previously patched, restore the original JAR
+with:
+
+```text
+Restore_CubeIDE_ARM64_STLink_Fix.bat
+```
+
+before updating CubeIDE or returning that installation to an unmodified state.
+
+## ST-LINK firmware does not need to be downgraded
+
+The firmware stored inside the ST-LINK probe does not need to be reverted just
+because the probe is moved between ARM64 and Intel/AMD PCs.
+
+The workaround is about the **host-side USB driver/enumeration behavior** and
+CubeIDE's ARM64 firmware-preflight path, not about using different probe
+firmware for different CPU architectures.
+
+
+# Important version limitation
+
+The supplied CubeIDE patch is intentionally version-specific.
+
+Tested:
+
+```text
+STM32CubeIDE 2.2.0
+
+com.st.stm32cube.ide.mcu.debug_2.2.300.202601241706.jar
+```
+
+Do not blindly use the patch with another CubeIDE version.
+
+If ST changes the plugin JAR or the `StLinkFwUtil` implementation, a new patch should be created and tested for that CubeIDE release.
+
+The installer should refuse to patch an unsupported installation rather than guessing.
+
+---
+
+# Why the CubeIDE patch is needed
+
+Two different ST-LINK enumeration paths were observed.
+
+The standalone GDB Server successfully enumerated the probe with:
+
+```text
+ST-LINK_gdbserver.exe -q
+```
+
+and successfully initialized SWD, reaching:
+
+```text
+Waiting for debugger connection...
+```
+
+However, CubeIDE's firmware verification used:
+
+```text
+ManagerSTLinkClient
+STLinkTcpClient
+STLinkServer
+```
+
+and returned no connected ST-LINK.
+
+That caused CubeIDE to abort before launching the working GDB Server.
+
+The patch bypasses only that faulty preflight validation.
 
 ---
 
 # Troubleshooting
 
-## CubeProgrammer does not see the ST-LINK
+## CubeProgrammer cannot see ST-LINK
 
-Confirm that the normal debug interface is using:
+Do not apply the CubeIDE JAR patch yet.
 
-```text
-Service: WinUSB
-```
-
-and that the ST interface GUID is present:
-
-```text
-{DBCE1CD9-A320-4B51-A365-A0C3F3C5FB29}
-```
-
-If needed, unplug/reconnect the ST-LINK after running the normal-mode patch.
-
-## STLinkUpgrade sees the ST-LINK initially but loses it after "Open in update mode"
-
-This means the ST-LINK probably switched from normal mode to its separate firmware-update USB device.
-
-Check Device Manager for:
-
-```text
-STM32 STLink
-VID_0483&PID_3748
-```
-
-Bind that device to WinUSB and run:
-
-```text
-Patch_STLink_Update_Mode.bat
-```
-
-## STM32 BOOTLOADER appears in Device Manager
-
-A separate device such as:
-
-```text
-VID_0483&PID_DF11
-STM32 BOOTLOADER
-```
-
-is not the same device as the ST-LINK/V2-1 firmware-update interface described above.
-
-Do not modify it as part of this procedure unless you specifically know that device is the one you intend to change.
+Fix the WinUSB / ST-LINK driver setup first.
 
 ---
 
-# Notes
+## GDB Server `-q` does not list the probe
 
-This procedure was tested successfully on a Nucleo-F411RE with its built-in ST-LINK/V2-1.
+The CubeIDE JAR patch will not fix this.
 
-Other ST-LINK versions may use different USB PIDs or interfaces. Verify the hardware ID in Device Manager before applying any registry or driver changes.
+The underlying USB/ST-LINK setup is still not working.
 
-The BAT files intentionally do not disable Secure Boot or Windows driver-signature enforcement. They use Microsoft's built-in WinUSB driver and add the ST device-interface GUID required for enumeration by ST tools.
+---
 
-Use this workaround at your own risk. Driver and registry changes affect USB device enumeration on the local Windows installation.
+## GDB Server reaches `Waiting for debugger connection...` but CubeIDE says `No ST-LINK detected`
+
+This is the exact condition the CubeIDE ARM64 JAR workaround addresses.
+
+---
+
+## CubeIDE launches but programming fails with a GDB `restore` command
+
+That is a separate flash-programming issue, not ST-LINK enumeration.
+
+For example:
+
+```text
+Writing to flash memory forbidden in this context
+```
+
+from a command such as:
+
+```text
+restore checksum.bin binary 0x08004040
+```
+
+means CubeIDE has already reached the debugger.
+
+Remove that custom `restore` command and use an appropriate flash programming flow instead.
+
+---
+
+# Files to commit to GitHub
+
+For the CubeIDE portion, commit:
+
+```text
+Install_CubeIDE_ARM64_STLink_Fix.bat
+Patch_STLink_ARM64.ps1
+Restore_CubeIDE_ARM64_STLink_Fix.bat
+README.md
+```
+
+Keep your existing WinUSB setup BAT files in the repository as well.
+
+Do **not** distribute STMicroelectronics JAR files themselves.
+
+The patch modifies the user's locally installed CubeIDE JAR after verifying the expected version.
+
+---
+
+# Disclaimer
+
+This project is an independent community workaround.
+
+It is not affiliated with, endorsed by, or supported by STMicroelectronics.
+
+STM32, STM32CubeIDE, STM32CubeProgrammer, ST-LINK, and related names are trademarks of their respective owners.
