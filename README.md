@@ -9,8 +9,10 @@ The workaround has been tested with:
 - Windows 11 ARM64
 - STM32CubeIDE 2.2.0
 - STM32CubeProgrammer
-- ST-LINK/V2-1 on a NUCLEO-F411RE
+- ST-LINK/V2 on a NUCLEO-F411RE
+- ST-LINK/V2 on a NUCLEO-L432KC
 - STM32F411 target
+- STM32L432KC target
 - ST-LINK GDB Server
 - SWD debugging
 - Source-level breakpoints
