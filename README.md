@@ -21,6 +21,10 @@ The workaround has been tested with:
 
 > This is an unofficial workaround and is not provided or supported by STMicroelectronics.
 
+As for the programming/debugging dongle, this works with the ST-LINK/V2 and has NOT been tested on a ST-LINK/V2-ISOL (I don't have one)
+
+<img width="256" height="384" alt="Image" src="https://github.com/user-attachments/assets/df3d89d1-138d-4940-89c9-dd718faeade3" />
+
 ---
 
 # Repository layout
