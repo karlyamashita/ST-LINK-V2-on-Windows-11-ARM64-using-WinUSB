@@ -13,9 +13,11 @@ The workaround has been tested with:
 - STM32CubeProgrammer 2.23.0
 - ST-LINK/V2 on a NUCLEO-F411RE
 - ST-LINK/V2 on a NUCLEO-L432KC
+- ST-LINK/V2 on a NUCLEO-C092RC
 - ST-LINK/V2 probe (see image below)
 - STM32F411 target
 - STM32L432KC target
+- STM32C092RC target
 - ST-LINK GDB Server
 - SWD debugging
 - Source-level breakpoints
