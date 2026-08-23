@@ -13,6 +13,7 @@ The workaround has been tested with:
 - STM32CubeProgrammer 2.23.0
 - ST-LINK/V2 on a NUCLEO-F411RE
 - ST-LINK/V2 on a NUCLEO-L432KC
+- ST-LINK/V2 probe (see image below)
 - STM32F411 target
 - STM32L432KC target
 - ST-LINK GDB Server
@@ -21,9 +22,8 @@ The workaround has been tested with:
 
 > This is an unofficial workaround and is not provided or supported by STMicroelectronics.
 
-As for the programming/debugging dongle, this works with the ST-LINK/V2 and has NOT been tested on a ST-LINK/V2-ISOL (I don't have one)
-
 <img width="256" height="384" alt="Image" src="https://github.com/user-attachments/assets/df3d89d1-138d-4940-89c9-dd718faeade3" />
+> This has not been officially tested on the ST-LINK/V2-ISOL. If you've got yours working, please let me know so I can update this README.
 
 ---
 
