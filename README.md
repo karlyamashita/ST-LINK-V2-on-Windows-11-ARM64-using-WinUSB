@@ -23,6 +23,7 @@ The workaround has been tested with:
 > This is an unofficial workaround and is not provided or supported by STMicroelectronics.
 
 <img width="256" height="384" alt="Image" src="https://github.com/user-attachments/assets/df3d89d1-138d-4940-89c9-dd718faeade3" />
+
 > This has not been officially tested on the ST-LINK/V2-ISOL. If you've got yours working, please let me know so I can update this README.
 
 ---
