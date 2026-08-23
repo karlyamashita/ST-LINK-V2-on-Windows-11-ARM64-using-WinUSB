@@ -1,6 +1,7 @@
 # STM32 ST-LINK/V2 on Windows ARM64
 
 This repository documents a working ST-LINK setup for **Windows on ARM64**.
+> You can watch the YouTube video here https://www.youtube.com/watch?v=dlw0cO1BUSg
 
 The first step is to make the **ST-LINK/V2 work with STM32CubeProgrammer** on Windows ARM64. This establishes the required WinUSB driver binding and ST device-interface GUID before any STM32CubeIDE-specific changes are made.
 
