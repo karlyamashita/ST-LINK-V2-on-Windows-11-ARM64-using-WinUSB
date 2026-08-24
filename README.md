@@ -12,8 +12,8 @@ The workaround has been tested with:
 - Windows 11 ARM64
 - STM32CubeIDE 2.2.0
 - STM32CubeProgrammer 2.23.0
-- NUCLEO boards with built-in ST-LINK/V2:
--       NUCLEO-F411RE, NUCLEO-L432KC, NUCLEO-C092RC, NUCLEO-F072RB, NUCLEO-F302RB, NUCLEO-L433RC-P, NUCLEO-F334R8
+- NUCLEO/Other boards with built-in ST-LINK/V2:
+-       NUCLEO-F411RE, NUCLEO-L432KC, NUCLEO-C092RC, NUCLEO-F072RB, NUCLEO-F302RB, NUCLEO-L433RC-P, NUCLEO-F334R8, B-L475E-IOT01A1
 - ST-LINK/V2 probe (see image below)
 - ST-LINK GDB Server
 - SWD debugging
