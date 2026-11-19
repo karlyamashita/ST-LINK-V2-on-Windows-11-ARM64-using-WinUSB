@@ -10,7 +10,8 @@ After STM32CubeProgrammer can detect the probe and communicate with the target, 
 The workaround has been tested with:
 
 - Windows 11 ARM64
-- STM32CubeIDE 2.2.0
+- STM32CubeIDE 2.2.0 (original version-specific patch)
+- STM32CubeIDE 2.3.0 (new Python GUI patcher; JAR patched and ST-LINK/V2 debugging confirmed)
 - STM32CubeProgrammer 2.23.0
 - NUCLEO/Other boards with built-in ST-LINK/V2:
 -       NUCLEO-F411RE, NUCLEO-L432KC, NUCLEO-C092RC, NUCLEO-F072RB, NUCLEO-F302RB, NUCLEO-L433RC-P, NUCLEO-F334R8
@@ -30,9 +31,10 @@ The workaround has been tested with:
 
 # Repository layout
 
-The fixes are separated by purpose. CubeIDE fixes are additionally separated
-by **STM32CubeIDE release**, because the JAR patch must be verified against the
-actual plugin shipped with each CubeIDE version.
+The fixes are separated by purpose. The original STM32CubeIDE 2.2.0 patch remains
+available in its version-specific folder. The newer Python GUI patcher is located
+in a separate folder and detects compatible plugin JARs without hardcoding a
+CubeIDE version.
 
 ```text
 ST-LINK-V2-on-Windows-11-ARM64-using-WinUSB\
@@ -40,6 +42,11 @@ ST-LINK-V2-on-Windows-11-ARM64-using-WinUSB\
 ├── STM32CubeProgrammer_fix\
 │   ├── Patch_STLink_Normal_Mode.bat
 │   └── Patch_STLink_Update_Mode.bat
+│
+├── STM32CubeIDE_ARM64_STLINK_Patcher\
+│   ├── Run_Patcher.bat
+│   ├── STM32CubeIDE_ARM64_STLINK_Patcher.py
+│   └── README.md
 │
 ├── STM32CubeIDE_fix\
 │   └── STM32CubeIDE_2.2.0\
@@ -64,41 +71,56 @@ STM32CubeIDE_fix\STM32CubeIDE_2.2.0
 Do not move the three files out of that version folder; they are intended to
 stay together.
 
-## Future STM32CubeIDE versions
+## NEW for STM32CubeIDE 2.3.0: Python GUI ARM64 ST-LINK patcher
 
-Do **not** copy the 2.2.0 patch into a new CubeIDE version folder and assume it
-is compatible.
+The new `STM32CubeIDE_ARM64_STLINK_Patcher` folder contains a Python GUI tool
+for patching the STM32CubeIDE ST-LINK firmware-preflight validation method.
+Unlike the original STM32CubeIDE 2.2.0 PowerShell patch, the GUI searches for
+the relevant plugin JAR and validates the expected class/method rather than
+relying on a fixed plugin filename or CubeIDE installation version.
 
-When ST releases STM32CubeIDE 2.2.1, 2.3.0, or a later release, the new
-installation must first be inspected. In particular, the ST-LINK debug plugin
-JAR and the firmware-preflight implementation must be checked to determine
-whether:
+**Confirmed working with STM32CubeIDE 2.3.0 on Windows 11 ARM64:** The new patcher
+successfully patched the JAR, and STM32CubeIDE was then able to debug using
+**ST-LINK/V2**. This is a confirmed functional debug test, not just a successful
+JAR modification.
 
-- the ARM64 problem still exists
-- ST has fixed the problem natively
-- the plugin JAR name/version changed
-- `StLinkFwUtil` or `validate(String)` changed
-- the existing patch logic is still applicable
-
-Only after that version has been analyzed and tested should a new folder be
-added, for example:
+The tested STM32CubeIDE 2.3.0 plugin was:
 
 ```text
-STM32CubeIDE_fix\
-├── STM32CubeIDE_2.2.0\
-├── STM32CubeIDE_2.2.1\
-└── STM32CubeIDE_2.3.0\
+com.st.stm32cube.ide.mcu.debug_2.2.400.202610271100.jar
 ```
 
-Each version folder should contain a patch made and verified specifically for
-that CubeIDE release.
+The original STM32CubeIDE 2.2.0 patch and instructions remain available below
+for users who prefer the original version-specific method.
 
-If ST fixes the Windows ARM64 ST-LINK preflight problem in a later release,
-that release should be documented as **native support / patch not required**
-instead of adding an unnecessary JAR modification.
+### How to use the new GUI patcher
 
-The version-specific installer should always fail safely on an unsupported
-CubeIDE/JAR rather than attempting to patch an unknown version.
+1. First complete the WinUSB and device-interface GUID setup described below,
+   and confirm STM32CubeProgrammer and the ST-LINK GDB Server can see the probe.
+2. Close STM32CubeIDE.
+3. Open `STM32CubeIDE_ARM64_STLINK_Patcher` and run `Run_Patcher.bat`.
+   Python 3 is required.
+4. In the GUI, select the STM32CubeIDE installation directory or executable.
+5. Scan for the compatible ST-LINK debug plugin JAR in the `plugins` directory.
+6. Use **Patch Selected JAR**. The tool backs up the original JAR as a `.jar.bak`
+   file before changing it.
+7. Restart STM32CubeIDE and test a debug session with **ST-LINK (ST-LINK GDB server)**.
+
+The GUI also provides a **Restore Original** operation to restore the backed-up
+JAR. Write access to the installation directory may require running the tool
+with administrator privileges. Keep the backup until you have verified debugging.
+
+### Future STM32CubeIDE versions
+
+The new patcher is designed to support later releases **provided ST retains a
+compatible `StLinkFwUtil.validate(String)` bytecode structure**. Compatibility
+with versions beyond the tested 2.3.0 release is not guaranteed. If ST changes
+or removes that implementation, the patcher should reject the unknown JAR
+rather than modifying it blindly. If ST fixes the ARM64 issue natively, no JAR
+patch should be necessary.
+
+The original 2.2.0 patch is **not** interchangeable with newer JARs. Do not
+copy its PowerShell script to a different release and assume compatibility.
 
 ---
 
@@ -284,6 +306,10 @@ If they work but CubeIDE still displays the firmware-verification popup, continu
 ---
 
 # 3. CubeIDE ARM64 firmware-preflight patch
+
+The instructions in this section describe the **original STM32CubeIDE 2.2.0
+version-specific PowerShell patch**. For STM32CubeIDE 2.3.0 and compatible
+future releases, use the newer Python GUI patcher documented above.
 
 ## Files required
 
@@ -631,41 +657,20 @@ firmware for different CPU architectures.
 
 # Important version limitation
 
-The supplied CubeIDE patch is intentionally version-specific.
+There are now two patching options:
 
-Tested:
+- **Original PowerShell patch:** verified specifically for STM32CubeIDE 2.2.0,
+  using `com.st.stm32cube.ide.mcu.debug_2.2.300.202601241706.jar`.
+- **New Python GUI patcher:** tested successfully on STM32CubeIDE 2.3.0,
+  using `com.st.stm32cube.ide.mcu.debug_2.2.400.202610271100.jar`.
+  After patching, STM32CubeIDE successfully debugged using ST-LINK/V2 on
+  Windows 11 ARM64.
 
-```text
-STM32CubeIDE 2.2.0
-
-com.st.stm32cube.ide.mcu.debug_2.2.300.202601241706.jar
-```
-
-Do not blindly use the patch with another CubeIDE version.
-
-For every new STM32CubeIDE release, first inspect the **new release's actual
-ST-LINK plugin JAR**. Verify the relevant class/method and determine whether the
-ARM64 preflight problem still exists before creating a fix.
-
-If a patch is still required, create a new version-specific folder under:
-
-```text
-STM32CubeIDE_fix
-```
-
-For example:
-
-```text
-STM32CubeIDE_fix\STM32CubeIDE_2.2.1
-```
-
-The new folder may use the 2.2.0 scripts as a starting point, but the JAR
-filename, version checks, class/method and patch logic must be validated against
-the new release before publishing it.
-
-If ST has fixed the issue, document that version as **patch not required**.
-
-The installer should refuse to patch an unsupported installation rather than guessing.
+The GUI patcher is designed to locate and validate compatible JARs for future
+releases, but each new release should still be tested. Do not assume future
+versions are compatible merely because the plugin filename matches. If ST
+changes the validation method or fixes ARM64 detection natively, reevaluate
+whether the patch is needed.
 
 ---
 
@@ -756,6 +761,11 @@ STM32CubeProgrammer_fix\
     Patch_STLink_Normal_Mode.bat
     Patch_STLink_Update_Mode.bat
 
+STM32CubeIDE_ARM64_STLINK_Patcher\
+    Run_Patcher.bat
+    STM32CubeIDE_ARM64_STLINK_Patcher.py
+    README.md
+
 STM32CubeIDE_fix\
     STM32CubeIDE_2.2.0\
         Install_CubeIDE_ARM64_STLink_Fix.bat
@@ -770,13 +780,13 @@ COM Port Friendly_name_editor\
 README.md
 ```
 
-Add another `STM32CubeIDE_<version>` folder only after that CubeIDE release has
-been inspected and its fix has been tested.
+Keep the original 2.2.0 patch in its existing folder. Use the GUI patcher for
+compatible newer releases; test each new CubeIDE version before claiming support.
 
 Do **not** distribute STMicroelectronics JAR files themselves.
 
 The patch modifies the user's locally installed CubeIDE JAR after verifying the
-expected version.
+expected plugin structure.
 
 ---
 
